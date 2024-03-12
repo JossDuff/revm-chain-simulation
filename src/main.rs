@@ -1,31 +1,46 @@
 use anyhow::{Context, Result};
-use std::{ops::Add, str::FromStr};
+use std::str::FromStr;
 
 use revm::{
-    db::{CacheDB, EmptyDB, EmptyDBTyped},
-    primitives::{Address, BlockEnv, Bytes, EVMError, ExecutionResult, TransactTo, TxEnv, U256},
+    db::EmptyDB,
+    primitives::{AccountInfo, Address, Bytes, ExecutionResult, TransactTo, TxEnv, U256},
     Evm, InMemoryDB,
 };
 
 fn main() {
     let mut evm = create_evm();
 
-    // TODO:
-    evm.db().insert_account_info("0x1c70319052E9Cfc804E3a8F408C828768F0Fe40A", info)
+    let address_1 = Address::from_str("0x1c70319052E9Cfc804E3a8F408C828768F0Fe40A").unwrap();
+    let address_2 = Address::from_str("0x961bdA3F1b384f3c1F8DBE26B5eF46bd5a9A80c3").unwrap();
 
+    // need to give an initial balance to the account
+    set_account_balance(evm.db_mut(), &address_1, 9999999999999999);
+
+    println!(
+        "initial balance account 1: {}",
+        get_account_balance(evm.db_mut(), &address_1)
+    );
+    println!(
+        "initial balance account 2: {}",
+        get_account_balance(evm.db_mut(), &address_2)
+    );
+
+    // This is an example tx.
+    // Later, we can have a vec of TxEnv to process at once as a "block", increment db block
+    // num, then return the new db state
     let example_transaction = TxEnv {
         caller: Address::from_str("0x1c70319052E9Cfc804E3a8F408C828768F0Fe40A").unwrap(),
-        gas_limit: 999999999999,
+        gas_limit: 99999,
         gas_price: U256::from(10),
         transact_to: TransactTo::Call(
             Address::from_str("0x961bdA3F1b384f3c1F8DBE26B5eF46bd5a9A80c3").unwrap(),
         ),
-        value: U256::from(999_999),
+        value: U256::from(999),
         data: Bytes::default(),
         nonce: Some(0),
         // the chain id of out evm is 1 by default
         chain_id: Some(1),
-        // TODO:
+        // idk
         access_list: vec![],
         // idc
         gas_priority_fee: None,
@@ -36,6 +51,10 @@ fn main() {
 
     let tx_result = process_tx(&mut evm, example_transaction).unwrap();
 
+    // at this point the transaction has update the db state, so we can poke around and look
+    // at new values. etc
+
+    // look at this cool and useful info
     match tx_result {
         ExecutionResult::Success {
             reason,
@@ -44,25 +63,24 @@ fn main() {
             logs,
             output,
         } => {
-            println!("ok! <3 Yay!")
+            println!("Success!  gas_used: {}", gas_used)
         }
         ExecutionResult::Halt { reason, gas_used } => {
-            println!("ok")
+            println!("Halted, reason: {:?}", reason)
         }
         ExecutionResult::Revert { gas_used, output } => {
-            println!("naughty")
+            println!("Reverted")
         }
     }
 
-    // let chain_id = evm.cfg().chain_id;
-    // println!("chain_id {}", chain_id);
-
-    // let block = evm.block();
-    // println!("original block num: {}", block.number);
-
-    // increment_block(&mut evm);
-    // let block = evm.block();
-    // println!("new block num: {}", block.number);
+    println!(
+        "ending balance account 1: {}",
+        get_account_balance(evm.db_mut(), &address_1)
+    );
+    println!(
+        "ending balance account 2: {}",
+        get_account_balance(evm.db_mut(), &address_2)
+    );
 }
 
 // static lifetime is okay for this example because we want evm to live the entire duration
@@ -78,9 +96,25 @@ fn create_evm() -> Evm<'static, (), InMemoryDB> {
 fn process_tx(evm: &mut Evm<'_, (), InMemoryDB>, tx: TxEnv) -> Result<ExecutionResult> {
     *evm.tx_mut() = tx;
 
-    evm.transact_commit().context("commit transaction to evm")
+    evm.transact_commit().context("commit transaction to db")
 }
 
+// updates out in-memory db to have a balance associated to this address
+// needed for initial block
+fn set_account_balance(db: &mut InMemoryDB, address: &Address, balance: u64) {
+    let balance = U256::from(balance);
+    let account_info = AccountInfo::from_balance(balance);
+
+    db.insert_account_info(*address, account_info);
+}
+
+// helper for getting an address's balance
+fn get_account_balance(db: &mut InMemoryDB, address: &Address) -> U256 {
+    db.load_account(*address).unwrap().info.balance
+}
+
+/*
+// For future!
 // mutates current evm state in place
 fn increment_block<'a>(evm: &mut Evm<'_, (), InMemoryDB>) {
     let old_block = evm.block();
@@ -96,3 +130,4 @@ fn increment_block<'a>(evm: &mut Evm<'_, (), InMemoryDB>) {
     // set the evm's block to the new block
     *evm.block_mut() = new_block;
 }
+*/
